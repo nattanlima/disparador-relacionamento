@@ -52,7 +52,7 @@
         .feedback-loading { animation: pulse-feedback 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
     </style>
 </head>
-<body class="flex flex-col items-center justify-center min-h-screen p-4">
+<body class="flex flex-col items-center min-h-screen p-4">
 
     <div class="w-full max-w-4xl">
         <!-- Cabeçalho -->
@@ -136,6 +136,57 @@
                  <div id="feedback" class="hidden mt-4 p-3 text-sm text-center font-semibold rounded-lg"></div>
             </div>
         </div>
+
+        <!-- Seção de Últimos Agendamentos -->
+        <div class="w-full max-w-4xl mt-8">
+            <div class="bg-white p-8 rounded-xl shadow-md">
+                <h3 class="text-lg font-bold text-gray-700 border-b pb-2 mb-4 flex items-center">
+                    <i class="fas fa-history mr-3"></i>Últimos Agendamentos
+                </h3>
+                <div id="schedule-list" class="space-y-3">
+                    <div id="schedule-loader" class="text-center text-gray-500 py-4">
+                        <i class="fas fa-spinner fa-spin mr-2"></i> Carregando agendamentos...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Confirmação -->
+    <div id="confirmation-modal" class="fixed inset-0 bg-black bg-opacity-60 hidden items-center justify-center p-4 z-50 transition-opacity duration-300" onclick="hideConfirmationModal()">
+        <div id="confirmation-modal-content" class="bg-white rounded-xl shadow-2xl w-full max-w-2xl transform transition-all duration-300 scale-95 opacity-0" onclick="event.stopPropagation()">
+            <div class="p-6 border-b flex justify-between items-center">
+                <h3 class="text-2xl font-bold text-gray-800">Revisar e Confirmar</h3>
+                <button id="close-modal-btn" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+            </div>
+            <div class="p-6 space-y-4">
+                <p class="text-gray-600">Por favor, revise os detalhes abaixo antes de confirmar a ação.</p>
+                <div class="bg-slate-50 p-4 rounded-lg space-y-3 border">
+                    <div>
+                        <span class="font-semibold text-gray-700">Filtros Selecionados:</span>
+                        <p id="review-statuses" class="text-gray-600"></p>
+                    </div>
+                    <div>
+                        <span class="font-semibold text-gray-700">Total de Grupos Encontrados:</span>
+                        <p id="review-group-count" class="text-gray-600 font-bold text-lg"></p>
+                    </div>
+                    <div>
+                        <span class="font-semibold text-gray-700">Agendamento:</span>
+                        <p id="review-schedule" class="text-gray-600"></p>
+                    </div>
+                    <div>
+                        <span class="font-semibold text-gray-700">Prévia da Mensagem:</span>
+                        <div id="review-message" class="mt-1 p-3 border bg-white rounded-md max-h-40 overflow-y-auto text-sm text-gray-800 whitespace-pre-wrap"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="p-4 border-t bg-slate-50 flex justify-end items-center gap-3 rounded-b-xl">
+                <button id="cancel-send-btn" class="px-6 py-2 rounded-full text-gray-700 bg-gray-200 hover:bg-gray-300 font-semibold">Cancelar</button>
+                <button id="confirm-send-btn" class="px-6 py-2 rounded-full text-white bg-[#2fc36a] hover:bg-[#29a85b] font-semibold flex items-center justify-center">
+                    <!-- O texto será dinâmico -->
+                </button>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -147,6 +198,7 @@
         // --- FIM: CONFIGURAÇÃO DO SUPABASE ---
 
         const WEBHOOK_URL = 'https://prismen8n.prismeapp.com.br/webhook/prepara-envio';
+        let payloadToSend = null; // Variável global para guardar o payload
 
         // --- INÍCIO: Elementos do DOM ---
         const sendButton = document.getElementById('send-button');
@@ -157,9 +209,81 @@
         const statusCheckboxes = document.querySelectorAll('input[name="status"]');
         const scheduleDateInput = document.getElementById('schedule-date');
         const scheduleTimeInput = document.getElementById('schedule-time');
+        const scheduleListDiv = document.getElementById('schedule-list');
+        // Modal elements
+        const confirmationModal = document.getElementById('confirmation-modal');
+        const confirmationModalContent = document.getElementById('confirmation-modal-content');
+        const closeModalBtn = document.getElementById('close-modal-btn');
+        const cancelSendBtn = document.getElementById('cancel-send-btn');
+        const confirmSendBtn = document.getElementById('confirm-send-btn');
         // --- FIM: Elementos do DOM ---
         
-        // --- INÍCIO: Lógica de Agendamento e UI ---
+        // --- INÍCIO: Funções de Renderização dos Agendamentos ---
+        function getStatusInfo(status) {
+            switch (status) {
+                case 'concluido': return { text: 'Concluído', color: 'green', icon: 'fa-check-circle' };
+                case 'pendente': return { text: 'Pendente', color: 'yellow', icon: 'fa-clock' };
+                case 'erro': return { text: 'Erro', color: 'red', icon: 'fa-exclamation-triangle' };
+                case 'processando': return { text: 'Processando', color: 'blue', icon: 'fa-spinner fa-spin' };
+                default: return { text: status || 'Desconhecido', color: 'gray', icon: 'fa-question-circle' };
+            }
+        }
+        
+        function renderSchedules(schedules) {
+            if (!schedules || schedules.length === 0) {
+                scheduleListDiv.innerHTML = `<p class="text-center text-gray-500 py-4">Nenhum agendamento encontrado.</p>`;
+                return;
+            }
+            const html = schedules.map(schedule => {
+                const statusInfo = getStatusInfo(schedule.status);
+                const groupCount = Array.isArray(schedule.grupos_whatsapp) ? schedule.grupos_whatsapp.length : 0;
+                const messageSnippet = schedule.mensagem.substring(0, 45) + (schedule.mensagem.length > 45 ? '...' : '');
+                const scheduleDate = new Date(schedule.disparar_em);
+                const formattedDate = scheduleDate.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+                return `<div class="p-4 rounded-lg border-l-4 border-${statusInfo.color}-400 bg-${statusInfo.color}-50 flex items-center justify-between gap-4"> <div class="flex-grow min-w-0"> <p class="font-semibold text-gray-800 truncate" title="${schedule.mensagem}">"${messageSnippet}"</p> <p class="text-sm text-gray-500 mt-1"> <i class="fas fa-users mr-1"></i> ${groupCount} grupos | <i class="far fa-calendar-alt ml-3 mr-1"></i> ${formattedDate} </p> </div> <div class="flex-shrink-0"> <span class="font-bold text-sm text-${statusInfo.color}-700 bg-${statusInfo.color}-200 px-3 py-1 rounded-full flex items-center"> <i class="fas ${statusInfo.icon} mr-2"></i> <span>${statusInfo.text}</span> </span> </div> </div>`;
+            }).join('');
+            scheduleListDiv.innerHTML = html;
+        }
+
+        async function fetchLatestSchedules() {
+            try {
+                const { data, error } = await supabaseClient.from('agendamentos').select('mensagem, grupos_whatsapp, status, disparar_em').order('created_at', { ascending: false }).limit(5);
+                if (error) throw new Error(`Erro ao buscar agendamentos: ${error.message}`);
+                renderSchedules(data);
+            } catch (err) {
+                console.error(err);
+                scheduleListDiv.innerHTML = `<p class="text-center text-red-500 py-4">${err.message}</p>`;
+            }
+        }
+        
+        function setupRealtimeSchedules() {
+            supabaseClient.channel('public:agendamentos').on('postgres_changes', { event: '*', schema: 'public', table: 'agendamentos' }, (payload) => { fetchLatestSchedules(); }).subscribe();
+        }
+        // --- FIM: Funções de Renderização dos Agendamentos ---
+
+        // --- INÍCIO: Lógica do Modal de Confirmação ---
+        function showConfirmationModal() {
+            confirmationModal.classList.remove('hidden');
+            confirmationModal.classList.add('flex');
+            requestAnimationFrame(() => {
+                confirmationModal.classList.remove('opacity-0');
+                confirmationModalContent.classList.remove('scale-95', 'opacity-0');
+            });
+        }
+
+        function hideConfirmationModal() {
+            confirmationModal.classList.add('opacity-0');
+            confirmationModalContent.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => {
+                confirmationModal.classList.add('hidden');
+                confirmationModal.classList.remove('flex');
+            }, 300);
+        }
+
+        closeModalBtn.addEventListener('click', hideConfirmationModal);
+        cancelSendBtn.addEventListener('click', hideConfirmationModal);
+        // --- FIM: Lógica do Modal de Confirmação ---
+
         function updateButtonUI() {
             if (scheduleDateInput.value && scheduleTimeInput.value) {
                 sendButtonText.textContent = 'Agendar Envio';
@@ -172,24 +296,17 @@
         
         scheduleDateInput.addEventListener('input', updateButtonUI);
         scheduleTimeInput.addEventListener('input', updateButtonUI);
-        // --- FIM: Lógica de Agendamento e UI ---
 
-        // Função para formatar texto (negrito/itálico)
         function formatText(style) {
-            const start = messageComposer.selectionStart;
-            const end = messageComposer.selectionEnd;
+            const start = messageComposer.selectionStart; const end = messageComposer.selectionEnd;
             const selectedText = messageComposer.value.substring(start, end);
-            
             if (!selectedText) { messageComposer.focus(); return; }
-
             let formattedText;
             if (style === 'bold') { formattedText = `*${selectedText}*`; } 
             else if (style === 'italic') { formattedText = `_${selectedText}_`; } 
             else { return; }
-
             messageComposer.value = messageComposer.value.substring(0, start) + formattedText + messageComposer.value.substring(end);
-            messageComposer.focus();
-            messageComposer.setSelectionRange(start, start + formattedText.length);
+            messageComposer.focus(); messageComposer.setSelectionRange(start, start + formattedText.length);
         }
         
         messageComposer.addEventListener('keydown', (e) => {
@@ -207,12 +324,10 @@
             else if (type === 'loading') feedbackDiv.classList.add('bg-blue-100', 'text-blue-800', 'feedback-loading');
         }
 
-        // Função principal que é chamada ao clicar no botão
-        async function prepareAndSendData() {
+        async function openReviewAndConfirm() {
             sendButton.disabled = true;
-            showFeedback('Iniciando o processo...', 'loading');
+            showFeedback('Validando e buscando dados...', 'loading');
 
-            // Validações básicas
             const selectedStatuses = Array.from(statusCheckboxes).filter(cb => cb.checked).map(cb => cb.value);
             if (selectedStatuses.length === 0) {
                 showFeedback('Erro: Por favor, selecione pelo menos um status para filtrar.', 'error');
@@ -225,11 +340,8 @@
                 sendButton.disabled = false; return;
             }
 
-            // Validação do Agendamento
-            let disparar_em = null;
-            const dateValue = scheduleDateInput.value;
-            const timeValue = scheduleTimeInput.value;
-
+            let disparar_em = null; const dateValue = scheduleDateInput.value; const timeValue = scheduleTimeInput.value;
+            let formattedSchedule = "Imediato";
             if (dateValue && timeValue) {
                 const combinedDateTime = new Date(`${dateValue}T${timeValue}`);
                 if (combinedDateTime < new Date()) {
@@ -237,57 +349,33 @@
                     sendButton.disabled = false; return;
                 }
                 disparar_em = combinedDateTime.toISOString();
+                formattedSchedule = combinedDateTime.toLocaleString('pt-BR', { dateStyle: 'full', timeStyle: 'short' });
             } else if (dateValue || timeValue) {
-                showFeedback('Erro: Para agendar, por favor, preencha tanto a data quanto a hora.', 'error');
+                showFeedback('Erro: Para agendar, preencha tanto a data quanto a hora.', 'error');
                 sendButton.disabled = false; return;
             }
 
             try {
-                showFeedback('Buscando clientes no Supabase...', 'loading');
-                const { data: clientes, error } = await supabaseClient
-                    .from('clientes')
-                    .select('link_grupo_whatsapp')
-                    .in('status', selectedStatuses);
-
+                const { data: clientes, error } = await supabaseClient.from('clientes').select('link_grupo_whatsapp').in('status', selectedStatuses);
                 if (error) throw new Error(`Erro no Supabase: ${error.message}`);
                 
-                if (!clientes || clientes.length === 0) {
-                    showFeedback('Nenhum cliente encontrado com os filtros selecionados.', 'error');
-                    sendButton.disabled = false; return;
-                }
-                
-                const groupLinks = clientes.map(c => c.link_grupo_whatsapp).filter(link => link && link.trim() !== '');
+                const groupLinks = clientes ? clientes.map(c => c.link_grupo_whatsapp).filter(link => link && link.trim() !== '') : [];
                 if (groupLinks.length === 0) {
-                    showFeedback('Os clientes encontrados não possuem links de grupo de WhatsApp válidos.', 'error');
+                    showFeedback('Nenhum cliente com link de grupo válido foi encontrado com os filtros selecionados.', 'error');
                     sendButton.disabled = false; return;
                 }
 
-                // Payload agora inclui a data de disparo
-                const payload = { 
-                    message: message, 
-                    whatsapp_groups: groupLinks,
-                    disparar_em: disparar_em 
-                };
+                payloadToSend = { message: message, whatsapp_groups: groupLinks, disparar_em: disparar_em };
                 
-                const actionText = disparar_em ? 'Agendando envio' : 'Enviando dados';
-                showFeedback(`${actionText} para ${groupLinks.length} grupos...`, 'loading');
+                // Preencher o modal
+                document.getElementById('review-statuses').textContent = selectedStatuses.join(', ');
+                document.getElementById('review-group-count').textContent = `${groupLinks.length} grupos`;
+                document.getElementById('review-schedule').textContent = formattedSchedule;
+                document.getElementById('review-message').textContent = message;
+                confirmSendBtn.innerHTML = disparar_em ? '<i class="fas fa-clock mr-2"></i>Confirmar Agendamento' : '<i class="fas fa-paper-plane mr-2"></i>Confirmar Envio';
 
-                const response = await fetch(WEBHOOK_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(`Erro na comunicação com o servidor. Status: ${response.status}. Resposta: ${errorText}`);
-                }
-
-                showFeedback(`Sucesso! O processo foi iniciado. A Eve vai notificar sobre o início e a finalização no grupo do Relacionamento.`, 'success');
-                messageComposer.value = '';
-                scheduleDateInput.value = '';
-                scheduleTimeInput.value = '';
-                updateButtonUI();
+                feedbackDiv.classList.add('hidden');
+                showConfirmationModal();
 
             } catch (err) {
                 console.error('Ocorreu um erro:', err);
@@ -297,7 +385,48 @@
             }
         }
 
-        sendButton.addEventListener('click', prepareAndSendData);
+        async function confirmAndSendData() {
+            hideConfirmationModal();
+            if (!payloadToSend) {
+                showFeedback('Erro: Dados para envio não encontrados.', 'error');
+                return;
+            }
+            
+            const actionText = payloadToSend.disparar_em ? 'Agendando envio' : 'Enviando dados';
+            showFeedback(`${actionText} para ${payloadToSend.whatsapp_groups.length} grupos...`, 'loading');
+
+            try {
+                const response = await fetch(WEBHOOK_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payloadToSend)
+                });
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Erro na comunicação com o servidor. Status: ${response.status}. Resposta: ${errorText}`);
+                }
+                showFeedback(`Sucesso! O processo foi iniciado. A Eve vai notificar sobre o início e a finalização no grupo do Relacionamento.`, 'success');
+                messageComposer.value = '';
+                scheduleDateInput.value = '';
+                scheduleTimeInput.value = '';
+                updateButtonUI();
+            } catch (err) {
+                console.error('Ocorreu um erro na confirmação:', err);
+                showFeedback(`Falha na operação: ${err.message}`, 'error');
+            } finally {
+                payloadToSend = null; // Limpa o payload após o uso
+            }
+        }
+
+        // --- INÍCIO: Execução Principal ---
+        sendButton.addEventListener('click', openReviewAndConfirm);
+        confirmSendBtn.addEventListener('click', confirmAndSendData);
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchLatestSchedules();
+            setupRealtimeSchedules();
+        });
+        // --- FIM: Execução Principal ---
     </script>
 </body>
 </html>
