@@ -184,7 +184,7 @@
         </div>
     </div>
 
-    <!-- Modal de Confirmação -->
+    <!-- Modal de Confirmação de Envio -->
     <div id="confirmation-modal" class="fixed inset-0 bg-black bg-opacity-60 hidden items-center justify-center p-4 z-50 transition-opacity duration-300" onclick="hideConfirmationModal()">
         <div id="confirmation-modal-content" class="bg-white rounded-xl shadow-2xl w-full max-w-2xl transform transition-all duration-300 scale-95 opacity-0" onclick="event.stopPropagation()">
             <div class="p-6 border-b flex justify-between items-center">
@@ -225,6 +225,17 @@
         </div>
     </div>
 
+    <!-- Modal de Confirmação Genérico (para o Cancelar) -->
+    <div id="generic-confirmation-modal" class="fixed inset-0 bg-black bg-opacity-60 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-sm p-6 text-center">
+            <p id="generic-confirmation-message" class="text-lg text-gray-800 mb-6"></p>
+            <div class="flex justify-center gap-4">
+                <button id="generic-confirm-cancel-btn" class="px-6 py-2 rounded-full text-gray-700 bg-gray-200 hover:bg-gray-300 font-semibold">Cancelar</button>
+                <button id="generic-confirm-action-btn" class="px-6 py-2 rounded-full text-white bg-red-500 hover:bg-red-600 font-semibold">Confirmar</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         // --- INÍCIO: CONFIGURAÇÃO DO SUPABASE ---
         const SUPABASE_URL = 'https://ccenxfyqwtfpexltuwrn.supabase.co';
@@ -234,7 +245,7 @@
         // --- FIM: CONFIGURAÇÃO DO SUPABASE ---
 
         const WEBHOOK_URL = 'https://prismen8n.prismeapp.com.br/webhook/prepara-envio';
-        let payloadToSend = null; // Variável global para guardar o payload
+        let payloadToSend = null; 
 
         // --- INÍCIO: Elementos do DOM ---
         const sendButton = document.getElementById('send-button');
@@ -248,21 +259,44 @@
         const scheduleTimeInput = document.getElementById('schedule-time');
         const scheduleListDiv = document.getElementById('schedule-list');
         const selectedCountSpan = document.getElementById('selected-count');
-        // Modal elements
         const confirmationModal = document.getElementById('confirmation-modal');
         const confirmationModalContent = document.getElementById('confirmation-modal-content');
         const closeModalBtn = document.getElementById('close-modal-btn');
         const cancelSendBtn = document.getElementById('cancel-send-btn');
         const confirmSendBtn = document.getElementById('confirm-send-btn');
+        const genericConfirmationModal = document.getElementById('generic-confirmation-modal');
+        const genericConfirmMsg = document.getElementById('generic-confirmation-message');
+        const genericConfirmActionBtn = document.getElementById('generic-confirm-action-btn');
+        const genericConfirmCancelBtn = document.getElementById('generic-confirm-cancel-btn');
         // --- FIM: Elementos do DOM ---
         
-        // --- INÍCIO: Funções de Renderização dos Agendamentos ---
+        // --- INÍCIO: Lógica do Modal de Confirmação Genérico ---
+        let onConfirmCallback = null;
+        function showGenericConfirmationModal(message, onConfirm) {
+            genericConfirmMsg.textContent = message;
+            onConfirmCallback = onConfirm;
+            genericConfirmationModal.classList.remove('hidden');
+            genericConfirmationModal.classList.add('flex');
+        }
+        function hideGenericConfirmationModal() {
+            genericConfirmationModal.classList.add('hidden');
+            genericConfirmationModal.classList.remove('flex');
+            onConfirmCallback = null;
+        }
+        genericConfirmCancelBtn.addEventListener('click', hideGenericConfirmationModal);
+        genericConfirmActionBtn.addEventListener('click', () => {
+            if (typeof onConfirmCallback === 'function') { onConfirmCallback(); }
+            hideGenericConfirmationModal();
+        });
+        // --- FIM: Lógica do Modal de Confirmação Genérico ---
+        
         function getStatusInfo(status) {
             switch (status) {
                 case 'concluido': return { text: 'Concluído', color: 'green', icon: 'fa-check-circle' };
                 case 'pendente': return { text: 'Pendente', color: 'yellow', icon: 'fa-clock' };
                 case 'erro': return { text: 'Erro', color: 'red', icon: 'fa-exclamation-triangle' };
                 case 'processando': return { text: 'Processando', color: 'blue', icon: 'fa-spinner fa-spin' };
+                case 'cancelado': return { text: 'Cancelado', color: 'gray', icon: 'fa-ban' };
                 default: return { text: status || 'Desconhecido', color: 'gray', icon: 'fa-question-circle' };
             }
         }
@@ -278,14 +312,15 @@
                 const messageSnippet = schedule.mensagem.substring(0, 45) + (schedule.mensagem.length > 45 ? '...' : '');
                 const scheduleDate = new Date(schedule.disparar_em);
                 const formattedDate = scheduleDate.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-                return `<div class="p-4 rounded-lg border-l-4 border-${statusInfo.color}-400 bg-${statusInfo.color}-50 flex items-center justify-between gap-4"> <div class="flex-grow min-w-0"> <p class="font-semibold text-gray-800 truncate" title="${schedule.mensagem}">"${messageSnippet}"</p> <p class="text-sm text-gray-500 mt-1"> <i class="fas fa-users mr-1"></i> ${groupCount} grupos | <i class="far fa-calendar-alt ml-3 mr-1"></i> ${formattedDate} </p> </div> <div class="flex-shrink-0"> <span class="font-bold text-sm text-${statusInfo.color}-700 bg-${statusInfo.color}-200 px-3 py-1 rounded-full flex items-center"> <i class="fas ${statusInfo.icon} mr-2"></i> <span>${statusInfo.text}</span> </span> </div> </div>`;
+                const cancelButton = schedule.status === 'pendente' ? `<button title="Cancelar Agendamento" class="cancel-schedule-btn text-red-400 hover:text-red-600 ml-4" data-schedule-id="${schedule.id}"><i class="fas fa-trash-alt"></i></button>` : '';
+                return `<div class="p-4 rounded-lg border-l-4 border-${statusInfo.color}-400 bg-${statusInfo.color}-50 flex items-center justify-between gap-4"> <div class="flex-grow min-w-0"> <p class="font-semibold text-gray-800 truncate" title="${schedule.mensagem}">"${messageSnippet}"</p> <p class="text-sm text-gray-500 mt-1"> <i class="fas fa-users mr-1"></i> ${groupCount} grupos | <i class="far fa-calendar-alt ml-3 mr-1"></i> ${formattedDate} </p> </div> <div class="flex-shrink-0 flex items-center"> <span class="font-bold text-sm text-${statusInfo.color}-700 bg-${statusInfo.color}-200 px-3 py-1 rounded-full flex items-center"> <i class="fas ${statusInfo.icon} mr-2"></i> <span>${statusInfo.text}</span> </span> ${cancelButton}</div> </div>`;
             }).join('');
             scheduleListDiv.innerHTML = html;
         }
 
         async function fetchLatestSchedules() {
             try {
-                const { data, error } = await supabaseClient.from('agendamentos').select('mensagem, grupos_whatsapp, status, disparar_em').order('created_at', { ascending: false }).limit(5);
+                const { data, error } = await supabaseClient.from('agendamentos').select('id, mensagem, grupos_whatsapp, status, disparar_em').order('created_at', { ascending: false }).limit(5);
                 if (error) throw new Error(`Erro ao buscar agendamentos: ${error.message}`);
                 renderSchedules(data);
             } catch (err) {
@@ -294,12 +329,39 @@
             }
         }
         
+        async function handleCancelSchedule(scheduleId) {
+            const confirmAction = async () => {
+                const buttonElement = document.querySelector(`[data-schedule-id="${scheduleId}"]`);
+                if(buttonElement) {
+                    buttonElement.innerHTML = `<i class="fas fa-spinner fa-spin"></i>`;
+                    buttonElement.disabled = true;
+                }
+                try {
+                    const { error } = await supabaseClient
+                        .from('agendamentos')
+                        .update({ status: 'cancelado' })
+                        .eq('id', scheduleId)
+                        .eq('status', 'pendente');
+                    if (error) throw error;
+                    // Força a atualização do front-end após o sucesso da operação
+                    await fetchLatestSchedules();
+                } catch (error) {
+                    console.error('Erro ao cancelar agendamento:', error);
+                    showFeedback(`Não foi possível cancelar: ${error.message}`, 'error');
+                    // Restaura o botão em caso de erro
+                    if(buttonElement) {
+                       buttonElement.innerHTML = `<i class="fas fa-trash-alt"></i>`;
+                       buttonElement.disabled = false;
+                    }
+                }
+            };
+            showGenericConfirmationModal('Tem certeza que deseja cancelar este agendamento? Esta ação não pode ser desfeita.', confirmAction);
+        }
+
         function setupRealtimeSchedules() {
             supabaseClient.channel('public:agendamentos').on('postgres_changes', { event: '*', schema: 'public', table: 'agendamentos' }, (payload) => { fetchLatestSchedules(); }).subscribe();
         }
-        // --- FIM: Funções de Renderização dos Agendamentos ---
-
-        // --- INÍCIO: Lógica do Contador Dinâmico ---
+        
         function debounce(func, delay) {
             let timeout;
             return function(...args) {
@@ -310,81 +372,45 @@
 
         async function updateSelectedCount() {
             selectedCountSpan.innerHTML = `<i class="fas fa-spinner fa-spin text-lg"></i>`;
-
             const selectedStatuses = Array.from(statusCheckboxes).filter(cb => cb.checked).map(cb => cb.value);
             const selectedTags = Array.from(tagCheckboxes).filter(cb => cb.checked).map(cb => cb.value);
-
-            if (selectedStatuses.length === 0) {
-                selectedCountSpan.textContent = '0';
-                return;
-            }
-
+            if (selectedStatuses.length === 0) { selectedCountSpan.textContent = '0'; return; }
             try {
-                const { data: clientsByStatus, error: statusError } = await supabaseClient
-                    .from('clientes')
-                    .select('id_cliente')
-                    .in('status', selectedStatuses);
-
+                const { data: clientsByStatus, error: statusError } = await supabaseClient.from('clientes').select('id_cliente').in('status', selectedStatuses);
                 if (statusError) throw statusError;
-
                 let finalClientIds = (clientsByStatus || []).map(c => c.id_cliente);
-
                 if (selectedTags.length > 0 && finalClientIds.length > 0) {
-                    const { data: clientsWithTags, error: tagError } = await supabaseClient
-                        .from('cliente_tags')
-                        .select('id_cliente')
-                        .in('id_cliente', finalClientIds)
-                        .in('id_tag', selectedTags);
-
+                    const { data: clientsWithTags, error: tagError } = await supabaseClient.from('cliente_tags').select('id_cliente').in('id_cliente', finalClientIds).in('id_tag', selectedTags);
                     if (tagError) throw tagError;
-                    
                     const taggedClientIds = new Set((clientsWithTags || []).map(ct => ct.id_cliente));
                     finalClientIds = finalClientIds.filter(id => taggedClientIds.has(id));
                 }
-                
                 selectedCountSpan.textContent = finalClientIds.length;
             } catch (error) {
                 console.error("Erro ao contar clientes:", error);
                 selectedCountSpan.textContent = '?';
             }
         }
-
         const debouncedUpdateCount = debounce(updateSelectedCount, 500);
-        // --- FIM: Lógica do Contador Dinâmico ---
 
-        // --- INÍCIO: Lógica do Modal de Confirmação ---
         function showConfirmationModal() {
-            confirmationModal.classList.remove('hidden');
-            confirmationModal.classList.add('flex');
-            requestAnimationFrame(() => {
-                confirmationModal.classList.remove('opacity-0');
-                confirmationModalContent.classList.remove('scale-95', 'opacity-0');
-            });
+            confirmationModal.classList.remove('hidden'); confirmationModal.classList.add('flex');
+            requestAnimationFrame(() => { confirmationModal.classList.remove('opacity-0'); confirmationModalContent.classList.remove('scale-95', 'opacity-0'); });
         }
-
         function hideConfirmationModal() {
-            confirmationModal.classList.add('opacity-0');
-            confirmationModalContent.classList.add('scale-95', 'opacity-0');
-            setTimeout(() => {
-                confirmationModal.classList.add('hidden');
-                confirmationModal.classList.remove('flex');
-            }, 300);
+            confirmationModal.classList.add('opacity-0'); confirmationModalContent.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => { confirmationModal.classList.add('hidden'); confirmationModal.classList.remove('flex'); }, 300);
         }
-
         closeModalBtn.addEventListener('click', hideConfirmationModal);
         cancelSendBtn.addEventListener('click', hideConfirmationModal);
-        // --- FIM: Lógica do Modal de Confirmação ---
 
         function updateButtonUI() {
             if (scheduleDateInput.value && scheduleTimeInput.value) {
-                sendButtonText.textContent = 'Agendar Envio';
-                sendButtonIcon.innerHTML = '<i class="fas fa-clock"></i>';
+                sendButtonText.textContent = 'Agendar Envio'; sendButtonIcon.innerHTML = '<i class="fas fa-clock"></i>';
             } else {
-                sendButtonText.textContent = 'Preparar e Enviar';
-                sendButtonIcon.innerHTML = '<i class="fas fa-paper-plane"></i>';
+                sendButtonText.textContent = 'Preparar e Enviar'; sendButtonIcon.innerHTML = '<i class="fas fa-paper-plane"></i>';
             }
         }
-        
         scheduleDateInput.addEventListener('input', updateButtonUI);
         scheduleTimeInput.addEventListener('input', updateButtonUI);
 
@@ -399,7 +425,6 @@
             messageComposer.value = messageComposer.value.substring(0, start) + formattedText + messageComposer.value.substring(end);
             messageComposer.focus(); messageComposer.setSelectionRange(start, start + formattedText.length);
         }
-        
         messageComposer.addEventListener('keydown', (e) => {
             if (e.ctrlKey) {
                 if (e.key === 'b' || e.key === 'B') { e.preventDefault(); formatText('bold'); } 
@@ -416,73 +441,44 @@
         }
 
         async function openReviewAndConfirm() {
-            sendButton.disabled = true;
-            showFeedback('Validando e buscando dados...', 'loading');
-
+            sendButton.disabled = true; showFeedback('Validando e buscando dados...', 'loading');
             const selectedStatuses = Array.from(statusCheckboxes).filter(cb => cb.checked).map(cb => cb.value);
             const selectedTags = Array.from(tagCheckboxes).filter(cb => cb.checked).map(cb => cb.value);
-
-            if (selectedStatuses.length === 0) {
-                showFeedback('Erro: Por favor, selecione pelo menos um status para filtrar.', 'error');
-                sendButton.disabled = false; return;
-            }
-
+            if (selectedStatuses.length === 0) { showFeedback('Erro: Por favor, selecione pelo menos um status para filtrar.', 'error'); sendButton.disabled = false; return; }
             const message = messageComposer.value.trim();
-            if (!message) {
-                showFeedback('Erro: O campo de mensagem não pode estar vazio.', 'error');
-                sendButton.disabled = false; return;
-            }
-
+            if (!message) { showFeedback('Erro: O campo de mensagem não pode estar vazio.', 'error'); sendButton.disabled = false; return; }
             let disparar_em = null; const dateValue = scheduleDateInput.value; const timeValue = scheduleTimeInput.value;
             let formattedSchedule = "Imediato";
             if (dateValue && timeValue) {
                 const combinedDateTime = new Date(`${dateValue}T${timeValue}`);
-                if (combinedDateTime < new Date()) {
-                    showFeedback('Erro: A data e hora do agendamento não podem estar no passado.', 'error');
-                    sendButton.disabled = false; return;
-                }
+                if (combinedDateTime < new Date()) { showFeedback('Erro: A data e hora do agendamento não podem estar no passado.', 'error'); sendButton.disabled = false; return; }
                 disparar_em = combinedDateTime.toISOString();
                 formattedSchedule = combinedDateTime.toLocaleString('pt-BR', { dateStyle: 'full', timeStyle: 'short' });
-            } else if (dateValue || timeValue) {
-                showFeedback('Erro: Para agendar, preencha tanto a data quanto a hora.', 'error');
-                sendButton.disabled = false; return;
-            }
-
+            } else if (dateValue || timeValue) { showFeedback('Erro: Para agendar, preencha tanto a data quanto a hora.', 'error'); sendButton.disabled = false; return; }
             try {
                 let { data: clientsByStatus, error: statusError } = await supabaseClient.from('clientes').select('id_cliente, link_grupo_whatsapp').in('status', selectedStatuses);
                 if (statusError) throw new Error(`Erro ao buscar clientes por status: ${statusError.message}`);
-
                 let finalClients = clientsByStatus || [];
                 if (selectedTags.length > 0 && finalClients.length > 0) {
                     const clientIdsByStatus = finalClients.map(c => c.id_cliente);
                     const { data: clientsWithTags, error: tagError } = await supabaseClient.from('cliente_tags').select('id_cliente').in('id_cliente', clientIdsByStatus).in('id_tag', selectedTags);
                     if (tagError) throw new Error(`Erro ao buscar tags de clientes: ${tagError.message}`);
-                    
                     const clientIdsWithTags = [...new Set((clientsWithTags || []).map(ct => ct.id_cliente))];
                     finalClients = finalClients.filter(client => clientIdsWithTags.includes(client.id_cliente));
                 }
-                
                 const groupLinks = finalClients.map(c => c.link_grupo_whatsapp).filter(link => link && link.trim() !== '');
-                if (groupLinks.length === 0) {
-                    showFeedback('Nenhum cliente com link de grupo válido foi encontrado com os filtros selecionados.', 'error');
-                    sendButton.disabled = false; return;
-                }
-
+                if (groupLinks.length === 0) { showFeedback('Nenhum cliente com link de grupo válido foi encontrado com os filtros selecionados.', 'error'); sendButton.disabled = false; return; }
                 payloadToSend = { message: message, whatsapp_groups: groupLinks, disparar_em: disparar_em };
-                
                 const tagMap = { 'TAG-01': 'Chatbot', 'TAG-02': 'Trafego Pago', 'TAG-03': 'Terceirização de Vendas' };
                 const selectedTagNames = selectedTags.map(tag => tagMap[tag] || tag);
-
                 document.getElementById('review-statuses').textContent = selectedStatuses.join(', ');
                 document.getElementById('review-tags').textContent = selectedTagNames.length > 0 ? selectedTagNames.join(', ') : "Nenhuma";
                 document.getElementById('review-group-count').textContent = `${groupLinks.length} grupos`;
                 document.getElementById('review-schedule').textContent = formattedSchedule;
                 document.getElementById('review-message').textContent = message;
                 confirmSendBtn.innerHTML = disparar_em ? '<i class="fas fa-clock mr-2"></i>Confirmar Agendamento' : '<i class="fas fa-paper-plane mr-2"></i>Confirmar Envio';
-
                 feedbackDiv.classList.add('hidden');
                 showConfirmationModal();
-
             } catch (err) {
                 console.error('Ocorreu um erro:', err);
                 showFeedback(`Falha na operação: ${err.message}`, 'error');
@@ -493,28 +489,17 @@
 
         async function confirmAndSendData() {
             hideConfirmationModal();
-            if (!payloadToSend) {
-                showFeedback('Erro: Dados para envio não encontrados.', 'error');
-                return;
-            }
-            
+            if (!payloadToSend) { showFeedback('Erro: Dados para envio não encontrados.', 'error'); return; }
             const actionText = payloadToSend.disparar_em ? 'Agendando envio' : 'Enviando dados';
             showFeedback(`${actionText} para ${payloadToSend.whatsapp_groups.length} grupos...`, 'loading');
-
             try {
-                const response = await fetch(WEBHOOK_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payloadToSend)
-                });
+                const response = await fetch(WEBHOOK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadToSend) });
                 if (!response.ok) {
                     const errorText = await response.text();
                     throw new Error(`Erro na comunicação com o servidor. Status: ${response.status}. Resposta: ${errorText}`);
                 }
                 showFeedback(`Sucesso! O processo foi iniciado. A Eve vai notificar sobre o início e a finalização no grupo do Relacionamento.`, 'success');
-                messageComposer.value = '';
-                scheduleDateInput.value = '';
-                scheduleTimeInput.value = '';
+                messageComposer.value = ''; scheduleDateInput.value = ''; scheduleTimeInput.value = '';
                 updateButtonUI();
             } catch (err) {
                 console.error('Ocorreu um erro na confirmação:', err);
@@ -527,12 +512,16 @@
         // --- INÍCIO: Execução Principal ---
         sendButton.addEventListener('click', openReviewAndConfirm);
         confirmSendBtn.addEventListener('click', confirmAndSendData);
-        
+        scheduleListDiv.addEventListener('click', function(event) {
+            const cancelButton = event.target.closest('.cancel-schedule-btn');
+            if (cancelButton) {
+                const scheduleId = cancelButton.dataset.scheduleId;
+                handleCancelSchedule(scheduleId);
+            }
+        });
         document.addEventListener('DOMContentLoaded', () => {
             fetchLatestSchedules();
             setupRealtimeSchedules();
-            
-            // Adiciona listeners para o contador dinâmico
             statusCheckboxes.forEach(cb => cb.addEventListener('change', debouncedUpdateCount));
             tagCheckboxes.forEach(cb => cb.addEventListener('change', debouncedUpdateCount));
         });
