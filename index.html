@@ -62,12 +62,19 @@
             <p class="text-gray-500 mt-1">Seleciona as colunas de clientes, crie a mensagem e envie para relacionar!</p>
         </div>
 
+        <!-- NOVO: Contador Dinâmico -->
+        <div class="mb-6 bg-slate-100 p-4 rounded-xl text-center shadow-sm">
+            <span class="text-lg font-bold text-gray-700">Total de Empresas Selecionadas:</span>
+            <span id="selected-count" class="ml-2 text-2xl font-extrabold text-[#2fc36a]">0</span>
+        </div>
+
+
         <!-- Container Principal -->
         <div class="bg-white p-8 rounded-xl shadow-md space-y-8">
             
             <!-- Seção de Filtros -->
             <div class="section">
-                <h3 class="text-lg font-bold text-gray-700 border-b pb-2 mb-4">1. Filtre os Clientes por Status</h3>
+                <h3 class="text-lg font-bold text-gray-700 border-b pb-2 mb-4">1. Filtre por Status</h3>
                 <div id="status-filters" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                     <div>
                         <input type="checkbox" id="status1" name="status" value="🚀 KickOFF" class="hidden status-checkbox">
@@ -102,9 +109,34 @@
                 </div>
             </div>
 
+            <!-- Seção de Filtros de Tags -->
+            <div class="section">
+                <h3 class="text-lg font-bold text-gray-700 border-b pb-2 mb-4">2. Filtre por Tags <span class="text-sm font-normal text-gray-500">(Opcional)</span></h3>
+                <div id="tag-filters" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                    <div>
+                        <input type="checkbox" id="tag1" name="tag" value="TAG-01" class="hidden status-checkbox">
+                        <label for="tag1" class="status-checkbox-label cursor-pointer flex items-center p-3 border-2 border-gray-200 rounded-lg hover:border-gray-400">
+                           <i class="fas fa-circle text-gray-300 mr-3"></i> Chatbot
+                        </label>
+                    </div>
+                    <div>
+                        <input type="checkbox" id="tag2" name="tag" value="TAG-02" class="hidden status-checkbox">
+                        <label for="tag2" class="status-checkbox-label cursor-pointer flex items-center p-3 border-2 border-gray-200 rounded-lg hover:border-gray-400">
+                           <i class="fas fa-circle text-gray-300 mr-3"></i> Trafego Pago
+                        </label>
+                    </div>
+                    <div>
+                        <input type="checkbox" id="tag3" name="tag" value="TAG-03" class="hidden status-checkbox">
+                        <label for="tag3" class="status-checkbox-label cursor-pointer flex items-center p-3 border-2 border-gray-200 rounded-lg hover:border-gray-400">
+                           <i class="fas fa-circle text-gray-300 mr-3"></i> Terceirização de Vendas
+                        </label>
+                    </div>
+                </div>
+            </div>
+
             <!-- Seção de Mensagem -->
             <div class="section">
-                <h3 class="text-lg font-bold text-gray-700 border-b pb-2 mb-4">2. Escreva a Mensagem</h3>
+                <h3 class="text-lg font-bold text-gray-700 border-b pb-2 mb-4">3. Escreva a Mensagem</h3>
                 <div class="toolbar mb-2">
                     <button onclick="formatText('bold')" title="Negrito (Ctrl+B)" class="w-10 h-10 bg-gray-100 hover:bg-gray-200 rounded-md"><i class="fas fa-bold"></i></button>
                     <button onclick="formatText('italic')" title="Itálico (Ctrl+I)" class="w-10 h-10 bg-gray-100 hover:bg-gray-200 rounded-md"><i class="fas fa-italic"></i></button>
@@ -114,7 +146,7 @@
             
             <!-- Seção de Agendamento -->
             <div class="section">
-                <h3 class="text-lg font-bold text-gray-700 border-b pb-2 mb-4">3. Agende o Disparo <span class="text-sm font-normal text-gray-500">(Opcional)</span></h3>
+                <h3 class="text-lg font-bold text-gray-700 border-b pb-2 mb-4">4. Agende o Disparo <span class="text-sm font-normal text-gray-500">(Opcional)</span></h3>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
                     <div>
                         <label for="schedule-date" class="text-sm font-medium text-gray-700">Data de Início</label>
@@ -163,8 +195,12 @@
                 <p class="text-gray-600">Por favor, revise os detalhes abaixo antes de confirmar a ação.</p>
                 <div class="bg-slate-50 p-4 rounded-lg space-y-3 border">
                     <div>
-                        <span class="font-semibold text-gray-700">Filtros Selecionados:</span>
+                        <span class="font-semibold text-gray-700">Filtros de Status:</span>
                         <p id="review-statuses" class="text-gray-600"></p>
+                    </div>
+                    <div>
+                        <span class="font-semibold text-gray-700">Filtros de Tags:</span>
+                        <p id="review-tags" class="text-gray-600"></p>
                     </div>
                     <div>
                         <span class="font-semibold text-gray-700">Total de Grupos Encontrados:</span>
@@ -207,9 +243,11 @@
         const feedbackDiv = document.getElementById('feedback');
         const messageComposer = document.getElementById('message-composer');
         const statusCheckboxes = document.querySelectorAll('input[name="status"]');
+        const tagCheckboxes = document.querySelectorAll('input[name="tag"]');
         const scheduleDateInput = document.getElementById('schedule-date');
         const scheduleTimeInput = document.getElementById('schedule-time');
         const scheduleListDiv = document.getElementById('schedule-list');
+        const selectedCountSpan = document.getElementById('selected-count');
         // Modal elements
         const confirmationModal = document.getElementById('confirmation-modal');
         const confirmationModalContent = document.getElementById('confirmation-modal-content');
@@ -260,6 +298,59 @@
             supabaseClient.channel('public:agendamentos').on('postgres_changes', { event: '*', schema: 'public', table: 'agendamentos' }, (payload) => { fetchLatestSchedules(); }).subscribe();
         }
         // --- FIM: Funções de Renderização dos Agendamentos ---
+
+        // --- INÍCIO: Lógica do Contador Dinâmico ---
+        function debounce(func, delay) {
+            let timeout;
+            return function(...args) {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => func.apply(this, args), delay);
+            };
+        }
+
+        async function updateSelectedCount() {
+            selectedCountSpan.innerHTML = `<i class="fas fa-spinner fa-spin text-lg"></i>`;
+
+            const selectedStatuses = Array.from(statusCheckboxes).filter(cb => cb.checked).map(cb => cb.value);
+            const selectedTags = Array.from(tagCheckboxes).filter(cb => cb.checked).map(cb => cb.value);
+
+            if (selectedStatuses.length === 0) {
+                selectedCountSpan.textContent = '0';
+                return;
+            }
+
+            try {
+                const { data: clientsByStatus, error: statusError } = await supabaseClient
+                    .from('clientes')
+                    .select('id_cliente')
+                    .in('status', selectedStatuses);
+
+                if (statusError) throw statusError;
+
+                let finalClientIds = (clientsByStatus || []).map(c => c.id_cliente);
+
+                if (selectedTags.length > 0 && finalClientIds.length > 0) {
+                    const { data: clientsWithTags, error: tagError } = await supabaseClient
+                        .from('cliente_tags')
+                        .select('id_cliente')
+                        .in('id_cliente', finalClientIds)
+                        .in('id_tag', selectedTags);
+
+                    if (tagError) throw tagError;
+                    
+                    const taggedClientIds = new Set((clientsWithTags || []).map(ct => ct.id_cliente));
+                    finalClientIds = finalClientIds.filter(id => taggedClientIds.has(id));
+                }
+                
+                selectedCountSpan.textContent = finalClientIds.length;
+            } catch (error) {
+                console.error("Erro ao contar clientes:", error);
+                selectedCountSpan.textContent = '?';
+            }
+        }
+
+        const debouncedUpdateCount = debounce(updateSelectedCount, 500);
+        // --- FIM: Lógica do Contador Dinâmico ---
 
         // --- INÍCIO: Lógica do Modal de Confirmação ---
         function showConfirmationModal() {
@@ -329,6 +420,8 @@
             showFeedback('Validando e buscando dados...', 'loading');
 
             const selectedStatuses = Array.from(statusCheckboxes).filter(cb => cb.checked).map(cb => cb.value);
+            const selectedTags = Array.from(tagCheckboxes).filter(cb => cb.checked).map(cb => cb.value);
+
             if (selectedStatuses.length === 0) {
                 showFeedback('Erro: Por favor, selecione pelo menos um status para filtrar.', 'error');
                 sendButton.disabled = false; return;
@@ -356,10 +449,20 @@
             }
 
             try {
-                const { data: clientes, error } = await supabaseClient.from('clientes').select('link_grupo_whatsapp').in('status', selectedStatuses);
-                if (error) throw new Error(`Erro no Supabase: ${error.message}`);
+                let { data: clientsByStatus, error: statusError } = await supabaseClient.from('clientes').select('id_cliente, link_grupo_whatsapp').in('status', selectedStatuses);
+                if (statusError) throw new Error(`Erro ao buscar clientes por status: ${statusError.message}`);
+
+                let finalClients = clientsByStatus || [];
+                if (selectedTags.length > 0 && finalClients.length > 0) {
+                    const clientIdsByStatus = finalClients.map(c => c.id_cliente);
+                    const { data: clientsWithTags, error: tagError } = await supabaseClient.from('cliente_tags').select('id_cliente').in('id_cliente', clientIdsByStatus).in('id_tag', selectedTags);
+                    if (tagError) throw new Error(`Erro ao buscar tags de clientes: ${tagError.message}`);
+                    
+                    const clientIdsWithTags = [...new Set((clientsWithTags || []).map(ct => ct.id_cliente))];
+                    finalClients = finalClients.filter(client => clientIdsWithTags.includes(client.id_cliente));
+                }
                 
-                const groupLinks = clientes ? clientes.map(c => c.link_grupo_whatsapp).filter(link => link && link.trim() !== '') : [];
+                const groupLinks = finalClients.map(c => c.link_grupo_whatsapp).filter(link => link && link.trim() !== '');
                 if (groupLinks.length === 0) {
                     showFeedback('Nenhum cliente com link de grupo válido foi encontrado com os filtros selecionados.', 'error');
                     sendButton.disabled = false; return;
@@ -367,8 +470,11 @@
 
                 payloadToSend = { message: message, whatsapp_groups: groupLinks, disparar_em: disparar_em };
                 
-                // Preencher o modal
+                const tagMap = { 'TAG-01': 'Chatbot', 'TAG-02': 'Trafego Pago', 'TAG-03': 'Terceirização de Vendas' };
+                const selectedTagNames = selectedTags.map(tag => tagMap[tag] || tag);
+
                 document.getElementById('review-statuses').textContent = selectedStatuses.join(', ');
+                document.getElementById('review-tags').textContent = selectedTagNames.length > 0 ? selectedTagNames.join(', ') : "Nenhuma";
                 document.getElementById('review-group-count').textContent = `${groupLinks.length} grupos`;
                 document.getElementById('review-schedule').textContent = formattedSchedule;
                 document.getElementById('review-message').textContent = message;
@@ -414,7 +520,7 @@
                 console.error('Ocorreu um erro na confirmação:', err);
                 showFeedback(`Falha na operação: ${err.message}`, 'error');
             } finally {
-                payloadToSend = null; // Limpa o payload após o uso
+                payloadToSend = null;
             }
         }
 
@@ -425,6 +531,10 @@
         document.addEventListener('DOMContentLoaded', () => {
             fetchLatestSchedules();
             setupRealtimeSchedules();
+            
+            // Adiciona listeners para o contador dinâmico
+            statusCheckboxes.forEach(cb => cb.addEventListener('change', debouncedUpdateCount));
+            tagCheckboxes.forEach(cb => cb.addEventListener('change', debouncedUpdateCount));
         });
         // --- FIM: Execução Principal ---
     </script>
